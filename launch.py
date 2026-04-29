@@ -14,6 +14,20 @@ def main(config_file, restart):
     crawler = Crawler(config, restart)
     crawler.start()
 
+    from scraper import word_counts, unique_urls, longest_page, subdomains
+
+    print("Unique pages: ", len(unique_urls))
+    print("Longest page: ", longest_page)
+
+    sorted_words = sorted(word_counts.items(), key=lambda x: x[1], reverse=True)[:50]
+    print("\nTop 50 words:")
+    for word, freq in sorted_words:
+        print(word, freq)
+
+    sorted_subdomains = sorted(subdomains.items())
+    print("\nSubdomains: ")
+    for sub, count in sorted_subdomains:
+        print(f"{sub}: {count}")
 
 if __name__ == "__main__":
     parser = ArgumentParser()

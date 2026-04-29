@@ -1,7 +1,46 @@
 import re
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urljoin
+from bs4 import BeautifulSoup
+from stopwords import STOP_WORDS
+
+word_counts = {}
+longest_page = ("", 0)
+subdomains = {}
+unique_urls = set()
 
 def scraper(url, resp):
+    global longest_page, subdomains
+
+    actual_url = resp.url
+
+    if resp.status != 200 or not resp.raw_response or actual_url in unique_urls:
+        return []
+
+    soup = BeautifulSoup(resp.raw_response.content, "html.parser")
+    text = soup.get_text()
+    words = re.findall(r"[a-zA-Z]+", text.lower())
+
+    if len(words) < 50:
+        return []
+
+    # word counting
+    for w in words:
+        if w not in STOP_WORDS:
+            word_counts[w] = word_counts.get(w, 0) + 1
+
+    # longest page
+    if len(words) > longest_page[1]:
+        longest_page = (actual_url, len(words))
+
+    # subdomain counting
+    parsed = urlparse(actual_url)
+    hostname = parsed.hostname
+    if hostname:
+        subdomains[hostname] = subdomains.get(hostname, 0) + 1
+
+    # unique url counting
+    unique_urls.add(actual_url)
+
     links = extract_next_links(url, resp)
     return [link for link in links if is_valid(link)]
 
@@ -15,16 +54,58 @@ def extract_next_links(url, resp):
     #         resp.raw_response.url: the url, again
     #         resp.raw_response.content: the content of the page!
     # Return a list with the hyperlinks (as strings) scrapped from resp.raw_response.content
-    return list()
+    if resp.status != 200 or not resp.raw_response:
+        return []
+
+    # Use BeautifulSoup to find all <a> tags with href
+    soup = BeautifulSoup(resp.raw_response.content, "html.parser")
+    found_links = []
+    for link in soup.find_all('a', href=True):
+        # join relative URLs with base URL
+        full_url = urljoin(resp.url, link['href'])
+        # remove anything after '#'
+        clean_url = full_url.split('#')[0]
+        found_links.append(clean_url)
+
+    return found_links
+
 
 def is_valid(url):
-    # Decide whether to crawl this url or not. 
+    # Decide whether to crawl this url or not.
     # If you decide to crawl it, return True; otherwise return False.
     # There are already some conditions that return False.
+    if any(trap in url.lower() for trap in [
+        "calendar",
+        "/events/",
+        "doku.php",
+        "?replytocom"
+    ]):
+        return False
+
     try:
         parsed = urlparse(url)
-        if parsed.scheme not in set(["http", "https"]):
+        if parsed.scheme not in {"http", "https"}:
             return False
+
+        allowed_domains = [
+            "ics.uci.edu",
+            "cs.uci.edu",
+            "informatics.uci.edu",
+            "stat.uci.edu"
+        ]
+
+        if not parsed.hostname:
+            return False
+
+        # precise check on the hostname of the url
+        is_allowed_domain = False
+        for domain in allowed_domains:
+            if parsed.hostname == domain or parsed.hostname.endswith("." + domain):
+                is_allowed_domain = True
+                break
+        if not is_allowed_domain:
+            return False
+
         return not re.match(
             r".*\.(css|js|bmp|gif|jpe?g|ico"
             + r"|png|tiff?|mid|mp2|mp3|mp4"
